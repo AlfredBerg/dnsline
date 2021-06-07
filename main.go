@@ -165,6 +165,7 @@ func responseDiffMode(domain string, client *dns.Client) (string, error) {
 			} else {
 				if len(firstResponse) != len(records) {
 					thereIsDifference = true
+					break
 				}
 				if len(records) == 0{
 					break
