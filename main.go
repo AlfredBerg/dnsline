@@ -19,7 +19,7 @@ var (
 	inFile                = flag.String("i", "", "File to read input from if STDIN is not used.")
 	resolver              = flag.String("r", "1.1.1.1", "Resolver to use.")
 	authoritativeZoneMode = flag.Bool("a", false, "Print the FQDN of the closes SOA (Start Of Authority)")
-	statusDiffModeFlag    = flag.Bool("s", false, "Check if there is a difference between the statuses and/or the resolved address(es) from the authoritative nameservers")
+	statusDiffModeFlag    = flag.Bool("s", false, "Check if there is a difference between the statuses from the authoritative nameservers")
 	responseDiffModeFlag  = flag.Bool("d", false, "Check if there is a difference between the resolved address(es) from the authoritative nameservers")
 
 	I_ROOT_SERVER = "192.36.148.17"
@@ -165,6 +165,9 @@ func responseDiffMode(domain string, client *dns.Client) (string, error) {
 			} else {
 				if len(firstResponse) != len(records) {
 					thereIsDifference = true
+				}
+				if len(records) == 0{
+					break
 				}
 				for r := range firstResponse {
 					if firstResponse[r] != records[r] {
