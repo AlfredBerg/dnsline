@@ -27,7 +27,7 @@ var (
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: \n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: \n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
