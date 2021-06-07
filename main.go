@@ -14,11 +14,13 @@ import (
 )
 
 var (
-	quadLookup          = flag.Bool("q", false, "Use AAAA record mode instead of the default A record")
-	concurrency         = flag.Int("c", 10, "Number of goroutines that try to resolve domains.")
-	inFile              = flag.String("i", "", "File to read input from if STDIN is not used.")
-	resolver            = flag.String("r", "1.1.1.1", "Resolver to use.")
-	authorativeZoneMode = flag.Bool("a", false, "Print the FQDN of the closes SOA (Start Of Authority)")
+	quadLookup            = flag.Bool("q", false, "Use AAAA record mode instead of the default A record")
+	concurrency           = flag.Int("c", 10, "Number of goroutines that try to resolve domains.")
+	inFile                = flag.String("i", "", "File to read input from if STDIN is not used.")
+	resolver              = flag.String("r", "1.1.1.1", "Resolver to use.")
+	authoritativeZoneMode = flag.Bool("a", false, "Print the FQDN of the closes SOA (Start Of Authority)")
+	statusDiffModeFlag    = flag.Bool("s", false, "Check if there is a difference between the statuses and/or the resolved address(es) from the authoritative nameservers")
+	responseDiffModeFlag  = flag.Bool("d", false, "Check if there is a difference between the resolved address(es) from the authoritative nameservers")
 
 	I_ROOT_SERVER = "192.36.148.17"
 )
@@ -40,8 +42,12 @@ func main() {
 			for domain := range domains {
 				resultString := ""
 				var err error
-				if *authorativeZoneMode {
+				if *authoritativeZoneMode {
 					resultString, err = zoneMode(domain, client)
+				} else if *statusDiffModeFlag {
+					resultString, err = statusMode(domain, client)
+				} else if *responseDiffModeFlag {
+					resultString, err = responseDiffMode(domain, client)
 				} else {
 					resultString, err = ipAddrMode(domain, client)
 				}
@@ -88,17 +94,132 @@ func main() {
 	}
 }
 
-func zoneMode(domain string, client *dns.Client) (string, error) {
-	lastAuthority := ""
-	maxDepth := 10
+func statusMode(domain string, client *dns.Client) (string, error) {
+	nameservers, err := getAuthorativeNameservers(domain, client)
+	if err != nil {
+		return "", err
+	}
 
+	statuses := []string{}
+	thereIsDifference := false
+	firstStatus := ""
+	for _, answer := range nameservers {
+		switch r := answer.(type) {
+		case *dns.NS:
+			statusAnswer, err := resolve(domain, dns.TypeA, client, r.Ns)
+			if err != nil {
+				return "", err
+			}
+			status := dns.RcodeToString[statusAnswer.Rcode]
+			if firstStatus == "" {
+				firstStatus = status
+			} else {
+				if firstStatus != status {
+					thereIsDifference = true
+				}
+			}
+			statuses = append(statuses, status)
+		}
+	}
+	return fmt.Sprintf("%s [%s] %v", domain, strings.Join(statuses, ","), thereIsDifference), err
+}
+
+func responseDiffMode(domain string, client *dns.Client) (string, error) {
+	nameservers, err := getAuthorativeNameservers(domain, client)
+	if err != nil {
+		return "", err
+	}
+
+	thereIsDifference := false
+	firstNs := ""
+	diffNs := ""
+	firstResponse := []string{}
+	diffResponse := []string{}
+	for i, answer := range nameservers {
+		switch r := answer.(type) {
+		case *dns.NS:
+			statusAnswer, err := resolve(domain, dns.TypeA, client, r.Ns)
+			if err != nil {
+				return "", err
+			}
+			records := []string{}
+			for _, record := range statusAnswer.Answer {
+				rString := ""
+				switch r := record.(type) {
+				case *dns.A:
+					rString = r.A.String()
+				case *dns.AAAA:
+					rString = r.AAAA.String()
+				case *dns.CNAME:
+					rString = r.Target
+				default:
+					return "", errors.New(fmt.Sprintf("Unknown record type: %s", record.String()))
+				}
+				records = append(records, rString)
+			}
+			sort.Strings(records)
+
+			if i == 0 {
+				firstResponse = records
+				firstNs = r.Ns
+			} else {
+				if len(firstResponse) != len(records) {
+					thereIsDifference = true
+				}
+				for r := range firstResponse {
+					if firstResponse[r] != records[r] {
+						thereIsDifference = true
+						break
+					}
+				}
+				if thereIsDifference {
+					diffResponse = records
+					diffNs = r.Ns
+					break
+				}
+			}
+		}
+	}
+	b := strings.Builder{}
+	b.WriteString(fmt.Sprintf("%s %v [%s]@%s ", domain, thereIsDifference, strings.Join(firstResponse, ","), firstNs))
+	if thereIsDifference {
+		b.WriteString(fmt.Sprintf("[%s]@%s", strings.Join(diffResponse, ","), diffNs))
+	}
+	return b.String(), nil
+}
+
+func zoneMode(domain string, client *dns.Client) (string, error) {
+	nameservers, err := getAuthorativeNameservers(domain, client)
+	if err != nil {
+		return "", err
+	}
+
+	authority := ""
+	//Lets just get the first ns record and what it is authoritative over
+	for _, answer := range nameservers {
+		switch r := answer.(type) {
+		case *dns.NS:
+			authority = r.Hdr.Name
+			break
+		}
+	}
+	if authority == "" {
+		return "", errors.New(fmt.Sprintf("%s Did not get any ns records\n", domain))
+	}
+	return fmt.Sprintf("%s for %s", authority, domain), err
+}
+
+//Returns a list of RRs that should contain NS records for the closes authorative zone to the input domain. It is the responsibility of the caller to check that the RRs are actually NS records
+func getAuthorativeNameservers(domain string, client *dns.Client) ([]dns.RR, error) {
+	var lastNSresourceRecords []dns.RR
+	maxDepth := 10
 	//TODO: Add some cache so we don't have to start at the ROOT all the time
 	answer, err := resolve(domain, dns.TypeA, client, I_ROOT_SERVER)
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("%s failed with %s\n", domain, err))
+		return nil, errors.New(fmt.Sprintf("%s failed with %s\n", domain, err))
 	}
 
-	//Lets (kinda) act like a recursive resolver from ROOT. The SOA will be the last place that had nameservers
+	//Lets (kinda) act like a recursive resolver from ROOT. The closest SOA will be the last place that had nameservers
 	for i := 0; i < maxDepth; i++ {
 		//Pick the first NS record
 		var ns *dns.NS
@@ -111,23 +232,24 @@ func zoneMode(domain string, client *dns.Client) (string, error) {
 		}
 
 		if answer.Authoritative {
-			return lastAuthority, nil
+			if lastNSresourceRecords != nil {
+				return lastNSresourceRecords, nil
+			}
+			return nil, errors.New(fmt.Sprintf("%s Unexpected state, got a authorative response but never got any NS servers\n", domain))
 		}
 
 		if ns == nil {
-			return "", errors.New(fmt.Sprintf("%s got no NS record, potentiall packet loss\n", domain))
+			return nil, errors.New(fmt.Sprintf("%s Unexpected response, got a response not containing ns records and it is not authorative\n", domain))
 		}
 
-		lastAuthority = ns.Hdr.Name
-
+		lastNSresourceRecords = answer.Ns
 		//Lazy, lets not look at the glue records or traverse the dns-tree ourself again for the address of the NS record. Make the default OS resolver handle that
 		answer, err = resolve(domain, dns.TypeA, client, ns.Ns)
 		if err != nil {
-			return "", errors.New(fmt.Sprintf("%s failed with %s\n", domain, err))
+			return nil, errors.New(fmt.Sprintf("%s failed with %s\n", domain, err))
 		}
 	}
-
-	return "", errors.New(fmt.Sprintf("%s depth limit reached before answer\n", domain))
+	return nil, errors.New(fmt.Sprintf("%s depth limit reached before answer\n", domain))
 }
 
 func ipAddrMode(domain string, client *dns.Client) (string, error) {
@@ -165,7 +287,6 @@ func prettyPrintResult(result *dns.Msg) string {
 		if len(aRecords) == 0 {
 			b.WriteString(">")
 		}
-
 	}
 	sort.Strings(aRecords)
 	b.WriteString("[")
