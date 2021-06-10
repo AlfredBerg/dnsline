@@ -118,7 +118,7 @@ func statusMode(domain string, client *dns.Client) (string, error) {
 					thereIsDifference = true
 				}
 			}
-			statuses = append(statuses, status)
+			statuses = append(statuses, fmt.Sprintf("%s@%s", status, r.Ns))
 		}
 	}
 	return fmt.Sprintf("%s [%s] %v", domain, strings.Join(statuses, ","), thereIsDifference), err
@@ -167,7 +167,7 @@ func responseDiffMode(domain string, client *dns.Client) (string, error) {
 					thereIsDifference = true
 					break
 				}
-				if len(records) == 0{
+				if len(records) == 0 {
 					break
 				}
 				for r := range firstResponse {
