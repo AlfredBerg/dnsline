@@ -15,7 +15,7 @@ import (
 
 var (
 	//TODO: flag for number of dns retries
-	quadLookup  = flag.Bool("q", false, "Query for AAAA records instead of the A records")
+	quadLookup  = flag.Bool("q", false, "Query for AAAA records instead of A records")
 	concurrency = flag.Int("c", 10, "Number of goroutines that try to resolve domains.")
 	inFile      = flag.String("i", "", "File to read input from if STDIN is not used.")
 	resolver    = flag.String("r", "1.1.1.1", "Resolver to use.")
