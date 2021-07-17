@@ -32,6 +32,9 @@ func (r soa) Resolve(domain string, client *dns.Client) (string, error) {
 			authority = r.Hdr.Name
 			break
 		}
+		if authority != ""{
+			break
+		}
 	}
 	if authority == "" {
 		return "", errors.New(fmt.Sprintf("%s Did not get any ns records\n", domain))

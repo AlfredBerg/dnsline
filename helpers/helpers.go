@@ -30,7 +30,6 @@ func ResolveCache(domainName string, recordType uint16, client *dns.Client, name
 		d := strings.Join(labels[i:], ".")
 		if interfaceResult, found := cache.Get(dns.Fqdn(d)); found {
 			if in, success := interfaceResult.(*dns.Msg); success {
-				//log.Printf("Sucsesfull cache read for %s\n", d)
 				if in.Authoritative {
 					return in, nil
 				} else {
@@ -77,6 +76,10 @@ func GetAuthorativeNameserversCache(domain string, client *dns.Client, recordTyp
 	maxDepth := 10
 
 	answer, err := ResolveCache(domain, recordType, client, I_ROOT_SERVER, cache)
+	if err != nil{
+		return nil, err
+	}
+	lastNSresourceRecords = getNsRecords(answer)
 
 	//Lets (kinda) act like a recursive resolver from ROOT. The closest SOA will be the last place that had nameservers
 	for i := 0; i < maxDepth; i++ {
@@ -97,7 +100,7 @@ func GetAuthorativeNameserversCache(domain string, client *dns.Client, recordTyp
 
 		}
 
-		lastNSresourceRecords = answer.Ns
+		lastNSresourceRecords = getNsRecords(answer)
 		//Lazy, lets not look at the glue records or traverse the dns-tree ourself again for the address of the NS record. Make the default OS resolver handle that
 		answer, err = ResolveCache(domain, dns.TypeA, client, ns.Ns, cache)
 		if err != nil {
@@ -119,6 +122,19 @@ func getNs(answer *dns.Msg) (ns *dns.NS) {
 		}
 	}
 	return ns
+}
+
+func getNsRecords(answer *dns.Msg) (nsRecords []dns.RR) {
+	if answer == nil {
+		return nil
+	}
+	for _, answer := range answer.Ns {
+		switch r := answer.(type) {
+		case *dns.NS:
+			nsRecords = append(nsRecords, r)
+		}
+	}
+	return nsRecords
 }
 
 //Returns a list of RRs that should contain NS records for the closes authorative zone to the input domain. It is the responsibility of the caller to check that the RRs are actually NS records
