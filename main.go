@@ -6,15 +6,18 @@ import (
 	"fmt"
 	"github.com/AlfredBerg/dnsline/resolver"
 	"github.com/miekg/dns"
+	"github.com/patrickmn/go-cache"
 	"log"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 var (
 	//TODO: flag for number of dns retries
-	quadLookup       = flag.Bool("q", false, "Query for AAAA records instead of A records")
+	quadLookup       = flag.Bool("q", false, "Query for AAAA records instead of A records.")
+	cacheDnsAnswers  = flag.Bool("cache", false, "Use a cache for the dns answers to reduce the number of network packets that need to be sent.")
 	concurrency      = flag.Int("c", 10, "Number of goroutines that try to resolve domains.")
 	inFile           = flag.String("i", "", "File to read input from if STDIN is not used.")
 	externalResolver = flag.String("r", "1.1.1.1", "Resolver to use.")
@@ -37,15 +40,17 @@ func main() {
 		recordType = dns.TypeAAAA
 	}
 
-	var resolvMethod resolver.Resolver
+	c := cache.New(5*time.Minute, 10*time.Minute)
+
+	var resolveMethod resolver.Resolver
 	if *mode == "soa" {
-		resolvMethod = resolver.NewSoa(recordType)
+		resolveMethod = resolver.NewSoa(recordType, c)
 	} else if *mode == "statusdiff" {
-		resolvMethod = resolver.NewDiffStatus(recordType)
+		resolveMethod = resolver.NewDiffStatus(recordType)
 	} else if *mode == "responsediff" {
-		resolvMethod = resolver.NewDiffResponse(recordType)
+		resolveMethod = resolver.NewDiffResponse(recordType)
 	} else if *mode == "resolve" {
-		resolvMethod = resolver.NewIpAddr(recordType, *externalResolver)
+		resolveMethod = resolver.NewIpAddr(recordType, *externalResolver)
 	} else {
 		log.Fatal("A unknown -m mode was specified")
 	}
@@ -58,7 +63,7 @@ func main() {
 		go func() {
 			client := new(dns.Client)
 			for domain := range domains {
-				resultString, err := resolvMethod.Resolve(domain, client)
+				resultString, err := resolveMethod.Resolve(domain, client)
 				if err != nil {
 					log.Printf("Error for %s: %s\n", domain, err.Error())
 					continue

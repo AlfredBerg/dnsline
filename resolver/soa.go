@@ -5,18 +5,21 @@ import (
 	"fmt"
 	"github.com/AlfredBerg/dnsline/helpers"
 	"github.com/miekg/dns"
+	"github.com/patrickmn/go-cache"
 )
 
 type soa struct {
+	cache      *cache.Cache
 	recordType uint16
 }
 
-func NewSoa(recordType uint16) soa {
-	return soa{recordType: recordType}
+func NewSoa(recordType uint16, cache *cache.Cache) soa {
+	return soa{recordType: recordType, cache: cache}
 }
 
 func (r soa) Resolve(domain string, client *dns.Client) (string, error) {
-	nameservers, err := helpers.GetAuthorativeNameservers(domain, client, r.recordType)
+	nameservers, err := helpers.GetAuthorativeNameserversCache(domain, client, r.recordType, r.cache)
+	//nameservers, err := helpers.GetAuthorativeNameservers(domain, client, r.recordType)
 	if err != nil {
 		return "", err
 	}
