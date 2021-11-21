@@ -11,20 +11,26 @@ import (
 
 var (
 	I_ROOT_SERVER = "192.36.148.17"
+	MAX_RETRIES   = 3
 )
 
 func Resolve(label string, recordType uint16, client *dns.Client, nameserver string, c *cache.Cache) (*dns.Msg, error) {
-	m := new(dns.Msg)
-	m.SetQuestion(dns.Fqdn(label), recordType)
-	answer, _, err := client.Exchange(m, nameserver+":53")
-	if err != nil {
-		return nil, err
-	}
+	var finalError error
+	for i := 0; i < MAX_RETRIES; i++ {
+		m := new(dns.Msg)
+		m.SetQuestion(dns.Fqdn(label), recordType)
+		answer, _, err := client.Exchange(m, nameserver+":53")
+		if err != nil {
+			finalError = err
+			continue
+		}
 
-	if zoneCut := getAnswerZoneCut(answer); c != nil && zoneCut != "" {
-		c.Add(zoneCut, answer, 0)
+		if zoneCut := getAnswerZoneCut(answer); c != nil && zoneCut != "" {
+			c.Add(zoneCut, answer, 0)
+		}
+		return answer, nil
 	}
-	return answer, err
+	return nil, finalError
 }
 
 //Gets where the delegation starts/stops. At returns "" for nameservers in SOA records (common for nxdomain responses)
@@ -52,8 +58,19 @@ func GetAuthoritativeNameservers(domain string, client *dns.Client, recordType u
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		var ns *dns.NS
+		for _, answer := range answer.Ns {
+			switch r := answer.(type) {
+			case *dns.NS:
+				ns = r
+				break
+			}
+		}
+		if ns != nil {
+			previousNSresourceRecords = answer.Ns
+		}
 	}
-
 	//Lets (kinda) act like a recursive resolver from ROOT. The closest SOA will be the last place that had nameservers
 	previousNSresourceRecords = answer.Ns
 	for i := 0; i < maxDepth; i++ {

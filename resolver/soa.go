@@ -36,7 +36,7 @@ func (r soa) Resolve(domain string, client *dns.Client) (string, error) {
 		}
 	}
 	if authority == "" {
-		return "", errors.New(fmt.Sprintf("%s Did not get any ns records\n", domain))
+		return "", errors.New(fmt.Sprintf("%s Did not get any ns records", domain))
 	}
 	return fmt.Sprintf("%s for %s", authority, domain), err
 }

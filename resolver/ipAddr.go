@@ -22,7 +22,7 @@ func (r ipAddr) Resolve(domain string, client *dns.Client) (string, error) {
 	result, err = helpers.Resolve(domain, r.recordType, client, r.externalResolver, nil)
 
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("%s failed with %s\n", domain, err))
+		return "", errors.New(fmt.Sprintf("%s failed with %s", domain, err))
 	}
 	resultString := helpers.PrettyPrintResult(result)
 	return resultString, nil
